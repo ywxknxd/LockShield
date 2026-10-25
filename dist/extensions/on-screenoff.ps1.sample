@@ -1,0 +1,16 @@
+# ============================================================
+# on-screenoff.ps1  —— 每次熄屏时执行
+# ============================================================
+# 用法：改名为 on-screenoff.ps1（去掉 .sample）即生效。
+#
+# 触发时机（三个都算）：
+#   1. 密码模式下遮罩出现后 0.8 秒自动熄屏
+#   2. 锁屏界面按 Esc 重新熄屏
+#   3. 密码关闭模式下直接熄屏（不弹遮罩）
+#
+# 运行环境：独立隐藏进程，主程序不等它跑完，路径写绝对路径。
+
+# 示例：熄屏时同时静音
+# Start-Process -FilePath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' `
+#     -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','D:\path\to\mute-system.ps1','-Mute' `
+#     -WindowStyle Hidden
