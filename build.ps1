@@ -18,7 +18,8 @@
 #>
 param(
     [string]$ModulePath = '',
-    [string]$OutFile    = ''
+    [string]$OutFile    = '',
+    [switch]$Console
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +30,10 @@ trap {
 }
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
-if (-not $OutFile) { $OutFile = Join-Path $here 'dist\LockShield.exe' }
+if (-not $OutFile) {
+    if ($Console) { $OutFile = Join-Path $here 'dist\LockShield-console.exe' }
+    else          { $OutFile = Join-Path $here 'dist\LockShield.exe' }
+}
 
 # ---- 找 PS2EXE ----
 if (-not $ModulePath) {
@@ -57,18 +61,25 @@ if (-not (Test-Path -LiteralPath $outDir)) { New-Item -ItemType Directory -Path 
 
 Write-Host "[build] 源文件: $src"
 Write-Host "[build] 输出:   $OutFile"
+if ($Console) { Write-Host '[build] 模式: 控制台版（会闪黑窗，仅调试用）' }
+else          { Write-Host '[build] 模式: GUI 版（无窗口，适合放开始菜单）' }
 
-Invoke-PS2EXE -InputFile $src `
-              -OutputFile $OutFile `
-              -Title 'LockShield' `
-              -Description 'Fullscreen lock mask with password, plus monitor-off mode' `
-              -Product 'LockShield' `
-              -Company '' `
-              -Version '1.0.0.0' `
-              -x64 `
-              -STA `
-              -SupportOS `
-              -Verbose
+$ps2exeArgs = @{
+    InputFile   = $src
+    OutputFile  = $OutFile
+    Title       = 'LockShield'
+    Description = 'Fullscreen lock mask with password, plus monitor-off mode'
+    Product     = 'LockShield'
+    Company     = ''
+    Version     = '1.1.0.0'
+    x64         = $true
+    STA         = $true
+    SupportOS   = $true
+}
+# 关键：不加 NoConsole 就会带一个控制台窗口，固定到开始菜单每次点都闪黑窗
+if (-not $Console) { $ps2exeArgs['NoConsole'] = $true }
+
+Invoke-PS2EXE @ps2exeArgs -Verbose
 
 if (-not (Test-Path -LiteralPath $OutFile)) { throw '编译结束但没有产物，看上面的报错' }
 
