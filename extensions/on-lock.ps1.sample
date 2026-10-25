@@ -1,0 +1,22 @@
+# ============================================================
+# on-lock.ps1  —— 遮罩出现时执行
+# ============================================================
+# 用法：把这个文件改名为 on-lock.ps1（去掉 .sample），就会被自动调用。
+#
+# 运行环境要清楚：
+#   - 独立进程，隐藏窗口，主程序不等它跑完
+#   - 不能假设当前工作目录，路径一律写绝对路径
+#   - 报错不会被主程序感知，自己写日志排查
+#
+# 常见用法示例（取消注释即可）：
+
+# 1) 锁屏时顺手把系统静音
+#    Start-Process -FilePath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' `
+#        -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','D:\path\to\mute-system.ps1','-Mute' `
+#        -WindowStyle Hidden
+
+# 2) 记一条锁屏日志
+#    Add-Content -LiteralPath 'D:\lockshield-hook.log' -Value ('lock at ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+
+# 3) 暂停正在播放的音乐（示例：调第三方播放器的 CLI）
+#    Start-Process -FilePath 'D:\path\to\player.exe' -ArgumentList 'pause' -WindowStyle Hidden
