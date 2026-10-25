@@ -31,8 +31,8 @@ trap {
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $OutFile) {
-    if ($Console) { $OutFile = Join-Path $here 'dist\LockShield-console.exe' }
-    else          { $OutFile = Join-Path $here 'dist\LockShield.exe' }
+    if ($Console) { $OutFile = Join-Path $here 'LockShield-console.exe' }
+    else          { $OutFile = Join-Path $here 'LockShield.exe' }
 }
 
 # ---- 找 PS2EXE ----
@@ -83,9 +83,9 @@ Invoke-PS2EXE @ps2exeArgs -Verbose
 
 if (-not (Test-Path -LiteralPath $OutFile)) { throw '编译结束但没有产物，看上面的报错' }
 
-# 把扩展示例一起放到 dist，方便直接分发（.sample 不会被自动执行）
+# 把扩展示例一起放到产物目录，方便直接分发（.sample 不会被自动执行）
 $extSrc = Join-Path $here 'extensions'
-if (Test-Path -LiteralPath $extSrc) {
+if ((Test-Path -LiteralPath $extSrc) -and ($outDir -ne $here)) {
     $extDst = Join-Path $outDir 'extensions'
     if (-not (Test-Path -LiteralPath $extDst)) { New-Item -ItemType Directory -Path $extDst -Force | Out-Null }
     Copy-Item -Path (Join-Path $extSrc '*.sample') -Destination $extDst -Force -ErrorAction SilentlyContinue
