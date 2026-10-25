@@ -1,0 +1,10 @@
+# 密码配置：含 salt 与哈希，不入库
+shield.config.json
+dist/shield.config.json
+
+# 用户自己加的扩展钩子（属于个人配置）
+extensions/*.ps1
+dist/extensions/*.ps1
+
+# 构建缓存
+*.log
