@@ -19,8 +19,14 @@
     ⚠️ 密码以加盐 SHA-256 存在 shield.config.json（没有明文），
        但这只是"别让旁边的人一眼看到"，不是加密保险箱。
 
+.PARAMETER Lock
+    直接锁屏并熄屏，不经过菜单。快捷方式用这个。
+
 .PARAMETER SetPassword
     设置或修改密码。会让你输两遍确认。
+
+.PARAMETER Toggle
+    直接切换「要不要密码」，不经过菜单。
 
 .PARAMETER Hint
     配合 -SetPassword 使用，设置提示语（会显示在输入框下方）。
@@ -32,19 +38,24 @@
     测试模式：只弹出遮罩界面，不熄屏。第一次调样式时用这个，省得黑屏了看不清。
 
 .EXAMPLE
+    .\lock-shield.ps1
+    弹出功能菜单（锁屏 / 改密码 / 开关密码保护）。
+
+.EXAMPLE
+    .\lock-shield.ps1 -Lock
+    直接锁屏，不进菜单。
+
+.EXAMPLE
     .\lock-shield.ps1 -SetPassword
     设置密码。
 
 .EXAMPLE
     .\lock-shield.ps1 -SetPassword -Hint "家里那只猫的名字"
     设置密码并写提示语。
-
-.EXAMPLE
-    .\lock-shield.ps1
-    启动遮罩并熄屏。
 #>
 [CmdletBinding()]
 param(
+    [switch]$Lock,
     [switch]$SetPassword,
     [switch]$Toggle,
     [string]$Hint = '',
@@ -351,6 +362,234 @@ function Invoke-SetupPassword {
 # 显式要求改密码
 if ($SetPassword) {
     if (Invoke-SetupPassword -InitialHint $Hint) { exit 0 } else { exit 1 }
+}
+
+# ============================================================
+# 1.7 主菜单：双击 exe（不带任何参数）时显示
+# ============================================================
+#   返回 'lock'  -> 关掉菜单，继续走下面的锁屏流程
+#   返回 'exit'  -> 直接退出
+# 设置密码 / 切换开关都在菜单内部完成，不关菜单，只刷新状态。
+function Show-MainMenu {
+    Initialize-Ui
+    $script:menuAction = 'exit'
+
+    $colBg     = [System.Drawing.Color]::FromArgb(30, 32, 37)
+    $colText   = [System.Drawing.Color]::FromArgb(236, 238, 242)
+    $colSub    = [System.Drawing.Color]::FromArgb(140, 146, 156)
+    $colBtn    = [System.Drawing.Color]::FromArgb(54, 58, 66)
+    $colBtnHov = [System.Drawing.Color]::FromArgb(72, 78, 88)
+    $colAcc    = [System.Drawing.Color]::FromArgb(74, 144, 226)
+    $colAccHov = [System.Drawing.Color]::FromArgb(96, 160, 240)
+    $colOn     = [System.Drawing.Color]::FromArgb(92, 200, 128)
+    $colOff    = [System.Drawing.Color]::FromArgb(214, 160, 90)
+
+    # 事件脚本块里要用到的，全部放脚本作用域，避免闭包丢失
+    $script:menuColSub = $colSub
+    $script:menuColOn  = $colOn
+    $script:menuColOff = $colOff
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text            = 'LockShield'
+    $form.ClientSize      = New-Object System.Drawing.Size(420, 352)
+    $form.StartPosition   = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedSingle
+    $form.MaximizeBox     = $false
+    $form.MinimizeBox     = $false
+    $form.BackColor       = $colBg
+    $form.ForeColor       = $colText
+    $form.Font            = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+    $form.KeyPreview      = $true
+    $script:menuForm = $form
+
+    $lblTitle = New-Object System.Windows.Forms.Label
+    $lblTitle.Text      = 'LockShield'
+    $lblTitle.Location  = New-Object System.Drawing.Point(26, 14)
+    $lblTitle.Size      = New-Object System.Drawing.Size(180, 34)
+    $lblTitle.Font      = New-Object System.Drawing.Font('Microsoft YaHei UI', 16, [System.Drawing.FontStyle]::Bold)
+    $lblTitle.ForeColor = $colText
+    $form.Controls.Add($lblTitle)
+
+    $lblVer = New-Object System.Windows.Forms.Label
+    $lblVer.Text      = '便携版'
+    $lblVer.Location  = New-Object System.Drawing.Point(168, 26)
+    $lblVer.Size      = New-Object System.Drawing.Size(60, 20)
+    $lblVer.ForeColor = $colAcc
+    $form.Controls.Add($lblVer)
+
+    $lblState = New-Object System.Windows.Forms.Label
+    $lblState.Location  = New-Object System.Drawing.Point(28, 56)
+    $lblState.Size      = New-Object System.Drawing.Size(364, 22)
+    $lblState.ForeColor = $colSub
+    $lblState.Font      = New-Object System.Drawing.Font('Microsoft YaHei UI', 9, [System.Drawing.FontStyle]::Bold)
+    $form.Controls.Add($lblState)
+    $script:menuState = $lblState
+
+    # ---- 主按钮：立即锁屏 ----
+    $btnLock = New-Object System.Windows.Forms.Button
+    $btnLock.Text      = '立即锁屏'
+    $btnLock.Location  = New-Object System.Drawing.Point(28, 88)
+    $btnLock.Size      = New-Object System.Drawing.Size(364, 48)
+    $btnLock.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $btnLock.FlatAppearance.BorderSize = 0
+    $btnLock.BackColor = $colAcc
+    $btnLock.ForeColor = [System.Drawing.Color]::White
+    $btnLock.Font      = New-Object System.Drawing.Font('Microsoft YaHei UI', 11, [System.Drawing.FontStyle]::Bold)
+    $btnLock.Cursor    = [System.Windows.Forms.Cursors]::Hand
+    $form.Controls.Add($btnLock)
+
+    # ---- 设置 / 修改密码 ----
+    $btnPwd = New-Object System.Windows.Forms.Button
+    $btnPwd.Text      = '设置 / 修改密码'
+    $btnPwd.Location  = New-Object System.Drawing.Point(28, 148)
+    $btnPwd.Size      = New-Object System.Drawing.Size(364, 40)
+    $btnPwd.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $btnPwd.FlatAppearance.BorderSize = 0
+    $btnPwd.BackColor = $colBtn
+    $btnPwd.ForeColor = $colText
+    $btnPwd.Cursor    = [System.Windows.Forms.Cursors]::Hand
+    $form.Controls.Add($btnPwd)
+
+    # ---- 密码保护开关（文案随状态变） ----
+    $btnSw = New-Object System.Windows.Forms.Button
+    $btnSw.Location  = New-Object System.Drawing.Point(28, 194)
+    $btnSw.Size      = New-Object System.Drawing.Size(364, 40)
+    $btnSw.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $btnSw.FlatAppearance.BorderSize = 0
+    $btnSw.BackColor = $colBtn
+    $btnSw.ForeColor = $colText
+    $btnSw.Cursor    = [System.Windows.Forms.Cursors]::Hand
+    $form.Controls.Add($btnSw)
+    $script:menuSwitch = $btnSw
+
+    # ---- 退出 ----
+    $btnQuit = New-Object System.Windows.Forms.Button
+    $btnQuit.Text      = '退出'
+    $btnQuit.Location  = New-Object System.Drawing.Point(28, 242)
+    $btnQuit.Size      = New-Object System.Drawing.Size(364, 34)
+    $btnQuit.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $btnQuit.FlatAppearance.BorderSize = 0
+    $btnQuit.BackColor = $colBg
+    $btnQuit.ForeColor = $colSub
+    $btnQuit.Cursor    = [System.Windows.Forms.Cursors]::Hand
+    $form.Controls.Add($btnQuit)
+
+    $lblPath = New-Object System.Windows.Forms.Label
+    $lblPath.Text      = '配置文件：' + $ConfigPath
+    $lblPath.Location  = New-Object System.Drawing.Point(28, 292)
+    $lblPath.Size      = New-Object System.Drawing.Size(364, 34)
+    $lblPath.ForeColor = $colSub
+    $lblPath.Font      = New-Object System.Drawing.Font('Microsoft YaHei UI', 7.5)
+    $form.Controls.Add($lblPath)
+
+    $lblTip = New-Object System.Windows.Forms.Label
+    $lblTip.Text      = '所有数据都在本文件夹内，整个文件夹拷走即可换机'
+    $lblTip.Location  = New-Object System.Drawing.Point(28, 322)
+    $lblTip.Size      = New-Object System.Drawing.Size(364, 20)
+    $lblTip.ForeColor = $colSub
+    $lblTip.Font      = New-Object System.Drawing.Font('Microsoft YaHei UI', 7.5)
+    $form.Controls.Add($lblTip)
+
+    # ---- hover 效果 ----
+    $btnLock.Add_MouseEnter({ $script:menuLock.BackColor = [System.Drawing.Color]::FromArgb(96, 160, 240) })
+    $btnLock.Add_MouseLeave({ $script:menuLock.BackColor = [System.Drawing.Color]::FromArgb(74, 144, 226) })
+    $btnPwd.Add_MouseEnter({ $script:menuPwd.BackColor = [System.Drawing.Color]::FromArgb(72, 78, 88) })
+    $btnPwd.Add_MouseLeave({ $script:menuPwd.BackColor = [System.Drawing.Color]::FromArgb(54, 58, 66) })
+    $btnSw.Add_MouseEnter({ $script:menuSwitch.BackColor = [System.Drawing.Color]::FromArgb(72, 78, 88) })
+    $btnSw.Add_MouseLeave({ $script:menuSwitch.BackColor = [System.Drawing.Color]::FromArgb(54, 58, 66) })
+    $script:menuLock = $btnLock
+    $script:menuPwd  = $btnPwd
+
+    # ---- 状态刷新 ----
+    $script:menuRefresh = {
+        $has = Test-Path -LiteralPath $ConfigPath
+        $on  = $false
+        if ($has) {
+            try {
+                $c = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($c.PSObject.Properties['enabled']) { $on = [bool]$c.enabled }
+            }
+            catch { }
+        }
+        if (-not $has) {
+            $script:menuState.Text      = '密码保护：尚未设置'
+            $script:menuState.ForeColor = $script:menuColSub
+            $script:menuSwitch.Text     = '设置密码保护'
+        }
+        elseif ($on) {
+            $script:menuState.Text      = '密码保护：已开启 · 锁屏后要输密码'
+            $script:menuState.ForeColor = $script:menuColOn
+            $script:menuSwitch.Text     = '关闭密码保护（改为只熄屏）'
+        }
+        else {
+            $script:menuState.Text      = '密码保护：已关闭 · 锁屏只熄屏，不输密码'
+            $script:menuState.ForeColor = $script:menuColOff
+            $script:menuSwitch.Text     = '开启密码保护（锁屏后要输密码）'
+        }
+    }
+    & $script:menuRefresh
+
+    # ---- 事件 ----
+    $btnLock.Add_Click({
+        if (-not (Test-Path -LiteralPath $ConfigPath)) {
+            if (-not (Invoke-SetupPassword)) { & $script:menuRefresh; return }
+        }
+        $script:menuAction = 'lock'
+        $script:menuForm.Close()
+    })
+
+    $btnPwd.Add_Click({
+        [void](Invoke-SetupPassword)
+        & $script:menuRefresh
+    })
+
+    $btnSw.Add_Click({
+        if (-not (Test-Path -LiteralPath $ConfigPath)) {
+            [void](Invoke-SetupPassword)
+            & $script:menuRefresh
+            return
+        }
+        try {
+            $c = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+        catch {
+            [void][System.Windows.Forms.MessageBox]::Show("配置文件读不了：$($_.Exception.Message)", 'LockShield', 'OK', 'Error')
+            return
+        }
+        $cur = $true
+        if ($c.PSObject.Properties['enabled']) { $cur = [bool]$c.enabled }
+        $new = -not $cur
+        $c | Add-Member -NotePropertyName 'enabled' -NotePropertyValue $new -Force
+        try {
+            [System.IO.File]::WriteAllText($ConfigPath, ($c | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($true)))
+        }
+        catch {
+            [void][System.Windows.Forms.MessageBox]::Show("写配置失败：$($_.Exception.Message)", 'LockShield', 'OK', 'Error')
+        }
+        & $script:menuRefresh
+    })
+
+    $btnQuit.Add_Click({
+        $script:menuAction = 'exit'
+        $script:menuForm.Close()
+    })
+
+    $form.Add_KeyDown({
+        if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
+            $script:menuAction = 'exit'
+            $script:menuForm.Close()
+        }
+    })
+
+    [void]$form.ShowDialog()
+    try { $form.Dispose() } catch { }
+    return $script:menuAction
+}
+
+# 不带参数启动 = 弹菜单；-Lock 才是直接锁屏
+if (-not $SetPassword -and -not $Toggle -and -not $Test -and -not $Lock) {
+    $menuAct = Show-MainMenu
+    if ($menuAct -ne 'lock') { exit 0 }
 }
 
 # ============================================================
