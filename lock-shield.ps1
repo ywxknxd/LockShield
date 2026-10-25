@@ -59,11 +59,10 @@ trap {
     $lineNo = $_.InvocationInfo.ScriptLineNumber
     $lineTxt = ''
     if ($_.InvocationInfo.Line) { $lineTxt = $_.InvocationInfo.Line.Trim() }
-    Write-Host ''
-    Write-Host "=== 脚本出错（第 $lineNo 行）===" -ForegroundColor Red
-    if ($lineTxt) { Write-Host "  代码：$lineTxt" -ForegroundColor DarkYellow }
-    Write-Host "  原因：$($_.Exception.Message)" -ForegroundColor Red
-    Write-Host ''
+    $msg = "脚本出错（第 $lineNo 行）`n`n原因：$($_.Exception.Message)"
+    if ($lineTxt) { $msg += "`n`n代码：$lineTxt" }
+    # Show-Ui 可能还没定义（错误发生在文件最前面时），所以兜一层
+    try { Show-Ui $msg 'LockShield' 'Error' } catch { Write-Host $msg -ForegroundColor Red }
     exit 1
 }
 
@@ -112,8 +111,65 @@ function Invoke-Hook {
 }
 
 # ============================================================
-# 0.5 工具函数
+# 0.5 界面通道 + 工具函数
 # ============================================================
+# 编译成无控制台的 GUI 版 exe 后，Write-Host 和 Read-Host 都是废的
+# （前者没地方显示，后者直接报错）。所以统一走这里：
+#   有控制台 -> 文字输出 / Read-Host
+#   没控制台 -> MessageBox 弹窗
+$script:hasConsole = $false
+try {
+    if (-not ('Win32.ConsoleProbe' -as [type])) {
+        Add-Type -Namespace Win32 -Name ConsoleProbe -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("kernel32.dll")]
+public static extern System.IntPtr GetConsoleWindow();
+'@
+    }
+    $script:hasConsole = ([Win32.ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero)
+}
+catch { $script:hasConsole = $false }
+
+$script:uiReady = $false
+function Initialize-Ui {
+    if ($script:uiReady) { return }
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $script:uiReady = $true
+}
+
+function Show-Ui {
+    param(
+        [string]$Text,
+        [string]$Title = 'LockShield',
+        [ValidateSet('Info', 'Warn', 'Error')][string]$Kind = 'Info'
+    )
+    if ($script:hasConsole) {
+        $color = 'Green'
+        if ($Kind -eq 'Warn')  { $color = 'Yellow' }
+        if ($Kind -eq 'Error') { $color = 'Red' }
+        Write-Host $Text -ForegroundColor $color
+        return
+    }
+    Initialize-Ui
+    $icon = [System.Windows.Forms.MessageBoxIcon]::Information
+    if ($Kind -eq 'Warn')  { $icon = [System.Windows.Forms.MessageBoxIcon]::Warning }
+    if ($Kind -eq 'Error') { $icon = [System.Windows.Forms.MessageBoxIcon]::Error }
+    [void][System.Windows.Forms.MessageBox]::Show($Text, $Title, [System.Windows.Forms.MessageBoxButtons]::OK, $icon)
+}
+
+function Show-Ask {
+    param([string]$Text, [string]$Title = 'LockShield')
+    if ($script:hasConsole) {
+        $a = Read-Host $Text
+        return ([string]$a -match '^[Yy]')
+    }
+    Initialize-Ui
+    $r = [System.Windows.Forms.MessageBox]::Show($Text, $Title,
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question)
+    return ($r -eq [System.Windows.Forms.DialogResult]::Yes)
+}
+
 function New-Salt {
     $b = New-Object byte[] 16
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
@@ -142,47 +198,159 @@ function ConvertFrom-Secure([System.Security.SecureString]$ss) {
 # ============================================================
 # 1. 设置密码（-SetPassword 主动调用，或首次双击时自动进入）
 # ============================================================
-function Invoke-SetupPassword {
-    Write-Host ''
-    Write-Host '=== 设置遮罩密码 ===' -ForegroundColor Cyan
-    Write-Host '（这是你自己定的密码，不是 Windows 账户密码）' -ForegroundColor DarkGray
-    Write-Host "密码存到：$ConfigPath" -ForegroundColor DarkGray
-    Write-Host ''
+function Show-PasswordDialog {
+    # 图形化设置密码：不管有没有控制台都用这个，行为一致
+    param([string]$InitialHint = '')
+    Initialize-Ui
 
-    $p1 = Read-Host '输入新密码（至少 4 位，输入时不显示）' -AsSecureString
-    $s1 = ConvertFrom-Secure $p1
-    if ($s1.Length -lt 4) {
-        Write-Host '密码太短（至少要 4 位），没保存。' -ForegroundColor Red
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = '设置遮罩密码'
+    $form.ClientSize = New-Object System.Drawing.Size(440, 300)
+    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.TopMost = $true
+    $form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+
+    $lbInfo = New-Object System.Windows.Forms.Label
+    $lbInfo.Text = '这是你自己定的遮罩密码，不是 Windows 账户密码。至少 4 位。'
+    $lbInfo.Location = New-Object System.Drawing.Point(20, 12)
+    $lbInfo.Size = New-Object System.Drawing.Size(400, 34)
+    $form.Controls.Add($lbInfo)
+
+    $lb1 = New-Object System.Windows.Forms.Label
+    $lb1.Text = '新密码'
+    $lb1.Location = New-Object System.Drawing.Point(20, 58)
+    $lb1.Size = New-Object System.Drawing.Size(90, 22)
+    $form.Controls.Add($lb1)
+
+    $tb1 = New-Object System.Windows.Forms.TextBox
+    $tb1.UseSystemPasswordChar = $true
+    $tb1.Location = New-Object System.Drawing.Point(115, 55)
+    $tb1.Size = New-Object System.Drawing.Size(300, 26)
+    $form.Controls.Add($tb1)
+
+    $lb2 = New-Object System.Windows.Forms.Label
+    $lb2.Text = '再输一次'
+    $lb2.Location = New-Object System.Drawing.Point(20, 96)
+    $lb2.Size = New-Object System.Drawing.Size(90, 22)
+    $form.Controls.Add($lb2)
+
+    $tb2 = New-Object System.Windows.Forms.TextBox
+    $tb2.UseSystemPasswordChar = $true
+    $tb2.Location = New-Object System.Drawing.Point(115, 93)
+    $tb2.Size = New-Object System.Drawing.Size(300, 26)
+    $form.Controls.Add($tb2)
+
+    $lb3 = New-Object System.Windows.Forms.Label
+    $lb3.Text = '提示语（可留空）'
+    $lb3.Location = New-Object System.Drawing.Point(20, 134)
+    $lb3.Size = New-Object System.Drawing.Size(90, 22)
+    $form.Controls.Add($lb3)
+
+    $tb3 = New-Object System.Windows.Forms.TextBox
+    $tb3.Location = New-Object System.Drawing.Point(115, 131)
+    $tb3.Size = New-Object System.Drawing.Size(300, 26)
+    if ($InitialHint) { $tb3.Text = $InitialHint }
+    $form.Controls.Add($tb3)
+
+    $lbErr = New-Object System.Windows.Forms.Label
+    $lbErr.Text = ''
+    $lbErr.ForeColor = [System.Drawing.Color]::FromArgb(200, 60, 60)
+    $lbErr.Location = New-Object System.Drawing.Point(20, 172)
+    $lbErr.Size = New-Object System.Drawing.Size(400, 22)
+    $form.Controls.Add($lbErr)
+
+    $btnOk = New-Object System.Windows.Forms.Button
+    $btnOk.Text = '保存'
+    $btnOk.Location = New-Object System.Drawing.Point(215, 215)
+    $btnOk.Size = New-Object System.Drawing.Size(95, 32)
+    $form.Controls.Add($btnOk)
+
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Text = '取消'
+    $btnCancel.Location = New-Object System.Drawing.Point(320, 215)
+    $btnCancel.Size = New-Object System.Drawing.Size(95, 32)
+    $form.Controls.Add($btnCancel)
+
+    $script:dialogOk = $false
+
+    $btnOk.Add_Click({
+        if ($tb1.Text.Length -lt 4) {
+            $lbErr.Text = '密码太短，至少要 4 位。'
+            $tb1.Focus()
+            return
+        }
+        if ($tb1.Text -cne $tb2.Text) {
+            $lbErr.Text = '两次输入不一致，重新输一次。'
+            $tb2.Clear()
+            $tb2.Focus()
+            return
+        }
+        $script:dialogOk = $true
+        $form.Close()
+    })
+
+    $btnCancel.Add_Click({ $form.Close() })
+
+    $form.AcceptButton = $btnOk
+    $form.CancelButton = $btnCancel
+
+    [void]$form.ShowDialog()
+
+    $result = $null
+    if ($script:dialogOk) {
+        $result = [pscustomobject]@{
+            pwd  = $tb1.Text
+            hint = ([string]$tb3.Text).Trim()
+        }
+    }
+    foreach ($c in @($tb1, $tb2, $tb3, $lbErr, $btnOk, $btnCancel, $lbInfo, $lb1, $lb2, $lb3, $form)) {
+        try { $c.Dispose() } catch { }
+    }
+    return $result
+}
+
+function Invoke-SetupPassword {
+    param([string]$InitialHint = '')
+
+    $res = Show-PasswordDialog -InitialHint $InitialHint
+    if ($null -eq $res) {
+        Show-Ui '已取消，密码没有改动。' 'LockShield' 'Warn'
         return $false
     }
 
-    $p2 = Read-Host '再输一次确认（这次明文显示，方便核对）'
-    # 故意不加 -AsSecureString：第二次用明文，方便核对是不是输错
-    $s2 = [string]$p2
-    if ($s1 -cne $s2) {
-        Write-Host '两次输入不一致，没保存。' -ForegroundColor Red
-        return $false
+    # 重设密码时保留原有的开关字段，别把它俩重置了
+    $old = $null
+    if (Test-Path -LiteralPath $ConfigPath) {
+        try { $old = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
     }
 
     $salt = New-Salt
     $obj = [ordered]@{
         salt      = $salt
-        hash      = (Get-Code ($salt + $s1))
-        hint      = $Hint
+        hash      = (Get-Code ($salt + $res.pwd))
+        hint      = $res.hint
         createdAt = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     }
+    if ($old) {
+        if ($old.PSObject.Properties['enabled'])      { $obj['enabled']      = [bool]$old.enabled }
+        if ($old.PSObject.Properties['hooksEnabled']) { $obj['hooksEnabled'] = [bool]$old.hooksEnabled }
+    }
+
     $json = ($obj | ConvertTo-Json)
     [System.IO.File]::WriteAllText($ConfigPath, $json, (New-Object System.Text.UTF8Encoding($true)))
 
-    Write-Host ''
-    Write-Host "已保存：$ConfigPath" -ForegroundColor Green
-    if ($Hint) { Write-Host "提示语：$Hint" -ForegroundColor Green }
+    $msg = "密码已保存。`n`n$ConfigPath"
+    if ($res.hint) { $msg += "`n`n提示语：$($res.hint)" }
+    Show-Ui $msg 'LockShield' 'Info'
     return $true
 }
 
 # 显式要求改密码
 if ($SetPassword) {
-    if (Invoke-SetupPassword) { exit 0 } else { exit 1 }
+    if (Invoke-SetupPassword -InitialHint $Hint) { exit 0 } else { exit 1 }
 }
 
 # ============================================================
@@ -190,17 +358,14 @@ if ($SetPassword) {
 # ============================================================
 if ($Toggle) {
     if (-not (Test-Path -LiteralPath $ConfigPath)) {
-        Write-Host ''
-        Write-Host '还没设置过密码（没有 shield.config.json），没什么可关的。' -ForegroundColor Red
-        Write-Host '先用 设置密码.bat 设一个；不想要密码的话直接用 monitor-off.bat 熄屏也行。' -ForegroundColor DarkGray
-        Write-Host ''
+        Show-Ui "还没设置过密码（没有 shield.config.json），没什么可关的。`n`n先用「设置密码」设一个。" 'LockShield' 'Error'
         exit 1
     }
     try {
         $cfgT = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
     }
     catch {
-        Write-Host "配置文件读不了（JSON 坏了？）：$($_.Exception.Message)" -ForegroundColor Red
+        Show-Ui "配置文件读不了（JSON 坏了？）：$($_.Exception.Message)" 'LockShield' 'Error'
         exit 1
     }
     $cur = $true
@@ -210,17 +375,12 @@ if ($Toggle) {
     $json = $cfgT | ConvertTo-Json
     [System.IO.File]::WriteAllText($ConfigPath, $json, (New-Object System.Text.UTF8Encoding($true)))
 
-    Write-Host ''
-    Write-Host '=== 遮罩密码开关 ===' -ForegroundColor Cyan
     if ($new) {
-        Write-Host '密码已【开启】：双击 lock-shield.bat 会锁定屏幕，回来要输密码。' -ForegroundColor Green
+        Show-Ui "密码已【开启】`n`n下次启动会弹出遮罩，回来要输密码。" 'LockShield' 'Info'
     }
     else {
-        Write-Host '密码已【关闭】：双击 lock-shield.bat 现在只熄屏，' -ForegroundColor Yellow
-        Write-Host '回来动一下鼠标就直接进桌面，不用输密码。' -ForegroundColor Yellow
-        Write-Host '（密码配置原样保留，再双击一次 密码开关.bat 就能切回来。）' -ForegroundColor DarkGray
+        Show-Ui "密码已【关闭】`n`n下次启动只熄屏，回来动一下鼠标就直接进桌面。`n密码配置原样保留，随时可以切回来。" 'LockShield' 'Warn'
     }
-    Write-Host ''
     exit 0
 }
 
@@ -228,19 +388,13 @@ if ($Toggle) {
 # 2. 读配置（没有就地引导设置，别让人空跑一趟）
 # ============================================================
 if (-not (Test-Path -LiteralPath $ConfigPath)) {
-    Write-Host ''
-    Write-Host '第一次用，先设一个遮罩密码。' -ForegroundColor Yellow
-    if (-not (Invoke-SetupPassword)) {
-        Write-Host ''
-        Write-Host '没设成。再双击一次 lock-shield.bat 重试。' -ForegroundColor Red
+    Show-Ui '第一次用，先设一个遮罩密码。' 'LockShield' 'Warn'
+    if (-not (Invoke-SetupPassword -InitialHint $Hint)) {
+        Show-Ui '没设成，再启动一次重试。' 'LockShield' 'Error'
         exit 1
     }
-    Write-Host ''
-    Write-Host '搞定。' -ForegroundColor Green
-    $tryNow = Read-Host '现在试一下锁定效果吗？输 Y 立刻锁屏，直接回车先不锁'
-    if ($tryNow -notmatch '^[Yy]') {
-        Write-Host '好，下次双击 lock-shield.bat 就直接锁定。' -ForegroundColor Green
-        Start-Sleep -Seconds 2
+    if (-not (Show-Ask '密码设好了。现在试一下锁定效果吗？' 'LockShield')) {
+        Show-Ui '好，下次启动就直接锁定。' 'LockShield' 'Info'
         exit 0
     }
 }
@@ -249,7 +403,7 @@ try {
     $cfg = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 catch {
-    Write-Host "配置文件读不了（JSON 坏了？）：$($_.Exception.Message)" -ForegroundColor Red
+    Show-Ui "配置文件读不了（JSON 坏了？）：$($_.Exception.Message)" 'LockShield' 'Error'
     exit 1
 }
 
@@ -260,7 +414,7 @@ $script:unlocked = $false
 $script:wrong    = 0
 
 if (-not $script:salt -or -not $script:hash) {
-    Write-Host '配置文件缺 salt / hash。重新设一次密码： lock-shield.bat -SetPassword' -ForegroundColor Red
+    Show-Ui '配置文件缺 salt / hash，重新设一次密码。' 'LockShield' 'Error'
     exit 1
 }
 
@@ -280,8 +434,8 @@ try {
     Add-Type -AssemblyName System.Drawing
 }
 catch {
-    Write-Host "载入 WinForms 失败：$($_.Exception.Message)" -ForegroundColor Red
-    Write-Host '（本机 PowerShell 可能不是 Windows 自带的 5.1）' -ForegroundColor Red
+    $m = "载入 WinForms 失败：$($_.Exception.Message)`n（本机 PowerShell 可能不是 Windows 自带的 5.1）"
+    try { Show-Ui $m 'LockShield' 'Error' } catch { Write-Host $m -ForegroundColor Red }
     exit 1
 }
 
