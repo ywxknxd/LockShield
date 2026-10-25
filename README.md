@@ -1,6 +1,6 @@
 # LockShield —— Windows 极简锁屏遮罩
 
-双击锁屏，回来输密码；不想输密码时，纯熄屏也行。单文件 58 KB，无窗口弹出，不装任何运行时。
+双击弹菜单，一键锁屏，回来输密码；不想输密码时，纯熄屏也行。单文件 67 KB，无窗口弹出，不装任何运行时。
 
 > **这不是安全机制。** 它挡的是"随手来点两下"的人，不是懂电脑的人。真要防人，用 Win+L 加系统账户密码。
 
@@ -17,21 +17,30 @@
 
 ---
 
-## 安装（推荐）
+## 使用
 
-双击 **`安装.bat`**，会做这几件事（全部是当前用户级，不需要管理员）：
+**绿色免安装**：整个文件夹放哪都行，双击 `LockShield.exe` 会弹出**主菜单**：
 
-1. 程序装到 `%LOCALAPPDATA%\Programs\LockShield\`
-2. 开始菜单建一个 `LockShield` 文件夹，里面三个入口：
-   - **锁屏** —— 立刻锁定并熄屏
-   - **设置密码** —— 图形化设置/修改密码
-   - **密码开关** —— 切换「要密码 / 只熄屏」
-3. 已有的密码配置和扩展钩子一起搬过去
-4. 注册到「应用和功能」，可以正常卸载
+- **立即锁屏** —— 遮罩 + 熄屏
+- **设置 / 修改密码** —— 图形化弹窗，输两遍确认
+- **切换密码保护** —— 要密码 / 只熄屏
+- 窗口顶部实时显示当前状态（已开启 / 已关闭 / 尚未设置）
 
-装完按 `Win` 键，搜「锁屏」就能看到。
+想在开始菜单里放入口，双击 **`安装.bat`**。它只做一件事：
+在你的开始菜单建一个 `LockShield` 文件夹，里面四个快捷方式——
 
-不想安装也行，直接双击 `dist\LockShield.exe` 就锁屏（配置文件会生成在 exe 旁边）。
+- **LockShield** —— 主菜单（同上）
+- **立即锁屏** —— 跳过菜单，直接锁屏熄屏
+- **设置密码** —— 直达改密码弹窗
+- **密码开关** —— 直达开 / 关切换
+
+它**不会复制任何文件**到 `%LOCALAPPDATA%`、`Program Files` 或别的地方，
+也不写「应用和功能」的卸载项。程序永远只有你手上这一份。
+
+装完按 `Win` 键，搜「LockShield」就能看到。
+
+> 想换位置就整个文件夹搬走，然后重新双击一次 `安装.bat`（快捷方式会指向新路径）。
+> 快捷方式是绝对路径，**搬完一定要重跑一次**，否则会指向旧位置。
 
 ---
 
@@ -39,8 +48,8 @@
 
 | 文件 | 作用 |
 |---|---|
-| `dist\LockShield.exe` | 主程序（GUI 版，无黑窗） |
-| `安装.bat` / `install.ps1` | 安装到开始菜单 / `-Uninstall` 卸载 |
+| `LockShield.exe` | 主程序（GUI 版，无黑窗） |
+| `安装.bat` / `install.ps1` | 就地创建开始菜单入口（不复制文件）/ `-Uninstall` 只删快捷方式 |
 | `lock-shield.ps1` | 源码，免编译直接跑 |
 | `monitor-off.ps1` | 纯熄屏，不遮罩 |
 | `build.ps1` | 重新编译 exe |
@@ -75,8 +84,8 @@
 .\lock-shield.ps1 -SetPassword -Hint "提示语"
 
 # exe 参数完全一样
-.\dist\LockShield.exe -Test
-.\dist\LockShield.exe -SetPassword
+.\LockShield.exe -Test
+.\LockShield.exe -SetPassword
 ```
 
 ---
@@ -105,12 +114,16 @@
 
 ## 卸载
 
+只想去掉开始菜单入口：
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 ```
 
-会先列出要删的东西，确认后才动手。`shield.config.json` 默认**保留**（备份到桌面），
-要连配置一起删就加 `-PurgeConfig`。
+会先列出要删的快捷方式，确认后才动手。**程序文件一个都不动。**
+
+彻底不用了：先跑上面那条，再把整个文件夹删掉即可（密码配置就在
+`shield.config.json` 里，会跟着一起删）。
 
 ---
 
@@ -120,10 +133,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
-# 产物：dist\LockShield.exe        （GUI 版，无控制台）
+# 产物：LockShield.exe        （GUI 版，无控制台）
 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -Console
-# 产物：dist\LockShield-console.exe（控制台版，调试用，会闪黑窗）
+# 产物：LockShield-console.exe（控制台版，调试用，会闪黑窗）
 ```
 
 编译参数：`-x64 -STA -SupportOS`，GUI 版额外加 `-NoConsole`。
